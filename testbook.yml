@@ -1,0 +1,21 @@
+- name: test my new module
+  hosts: localhost
+  tasks:
+    - name: run the new module
+      dependency-track:
+        url: 'http://localhost:8081'
+        apiKey: ''
+        oidcGroups:
+          - "Universphere"
+          - "Foobar"
+        teams:
+          - name: Foobar
+            oidcGroups:
+              - Universphere
+              - Foobar
+#            ldapGroups: []
+            permissions:
+              - SYSTEM_CONFIGURATION
+            portfolioAccessControl:
+              - StaardUp
+
