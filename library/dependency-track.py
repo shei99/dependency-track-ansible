@@ -22,16 +22,39 @@ options:
         required: true
         type: string
         
-    apiKey:
+    api_key:
         description: The api key which has the permissions to manipulate the state of the apiserver
         required: true
         type: str
         
-    oidcGroups:
-        description: The oidc group, that should be created
+    oidc_groups:
+        description: The oidc group, that should be created or deleted
         required: false
         type: list
         default: []
+        
+    projects:
+        description: The oidc group, that should be created or deleted
+        required: false
+        type: list
+        default: []
+        
+        elements: dict
+        subelements:
+            name:
+                description: The name of the project
+                required: false
+                type: str
+            parent:
+                description: The parent name of the project
+                required: false
+                type: str
+            classifier:
+                description: The classifier of the project
+                required: false
+                type: str
+                choices: '"APPLICATION", "CONTAINER", "DEVICE", "FILE", "FIRMWARE", "FRAMEWORK", "LIBRARY", "OPERATING SYSTEM"'
+            
     
     state:
         description: The state of the resources (absent, present)
@@ -43,6 +66,7 @@ options:
         description: The team, that should be created
         required: false
         type: list
+        default: {}
         
         elements: dict
         subelements:
@@ -50,32 +74,45 @@ options:
                 description: The team name
                 required: false
                 type: str
-            oidcGroups:
+            oidc_groups:
                 description: The oidc group, that should be associated with the team
-                required: false
-                type: list
-            ldapGroup:
-                description: The ldap group, that should be associated with the team
                 required: false
                 type: list
             permissions:
                 description: The permissions which the team should get
                 required: false
                 type: list
-            portfolioAccessControl:
+                choices: '"ACCESS_MANAGEMENT", "BOM_UPLOAD", "POLICY_MANAGEMENT", "POLICY_VIOLATION_ANALYSIS", "PORTFOLIO_MANAGEMENT", "PROJECT_CREATION_UPLOAD", "SYSTEM_CONFIGURATION", "VIEW_PORTFOLIO", "VIEW_VULNERABILITY", "VULNERABILITY_MANAGEMENT"'
+            portfolio_access_control:
                 description: The configuration of the portfolio access control
                 required: false
                 type: dict
+                default: {}
                 
-                verifyParents:
-                    description: Verify that projects are children of the parent with the name of the group
-                    required: false
-                    type: boolean
-                    
-                projects:
-                    description: The list of the projects the group should have access to
-                    required: false
-                    type: list
+                subelements:
+                    verify:
+                        description: Verify that projects are children of the root project
+                        required: false
+                        type: dict
+                        default: {}
+                        
+                        subelements:
+                            enabled:
+                                description: Enable the verification of the project hierarchy
+                                required: false
+                                type: bool
+                                default: False
+                            root_project:
+                                description: The project root, which all child projects should be part of. Otherwise the access is denied.
+                                required: false
+                                type: str
+                                default: ''
+                        
+                    projects:
+                        description: The list of the projects the group should have access to
+                        required: false
+                        type: list
+                        default: []
                     
             
 # Specify this value according to your collection
@@ -88,35 +125,94 @@ author:
 '''
 
 EXAMPLES = r'''
-# Pass in a message
-- name: Test with a message
-  my_namespace.my_collection.my_test:
-    name: hello world
+- name: test my new module
+  hosts: localhost
+  tasks:
+    - name: create oidc groups
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        oidc_groups:
+          - Foobar
+          - Foo
+          - Bar
 
-# pass in a message and have changed true
-- name: Test with a message and changed output
-  my_namespace.my_collection.my_test:
-    name: hello world
-    new: true
+    - name: create team
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        teams:
+          - name: Foo
 
-# fail the module
-- name: Test failure of the module
-  my_namespace.my_collection.my_test:
-    name: fail me
+    - name: create projects
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        projects:
+          - name: Foobar
+            classifier: APPLICATION
+          - name: FoobarContainer
+            parent: Foobar
+            classifier: CONTAINER
+          - name: Foo
+            classifier: APPLICATION
+          - name: Bar
+            classifier: APPLICATION
+
+    - name: create foobar team with permissions and portfolio access control
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        teams:
+          - name: Foobar
+            oidc_groups:
+              - Foobar
+            permissions:
+              - SYSTEM_CONFIGURATION
+            portfolio_access_control:
+              verify:
+                enabled: True
+                root_project: Foobar
+              projects:
+                - FoobarContainer
+
+    - name: delete oidc group
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        oidc_groups:
+          - Bar
+        state: absent
+
+    - name: delete team
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        teams:
+          - name: Bar
+        state: absent
+
+    - name: delete project
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        projects:
+          - name: Bar
+        state: absent
 '''
 
 RETURN = r'''
 # These are examples of possible return values, and in general should use other names for return values.
-original_message:
-    description: The original name param that was passed in.
-    type: str
+changed:
+    description: Whether the configuration has changed.
+    type: bool
     returned: always
-    sample: 'hello world'
-message:
-    description: The output message that the test module generates.
-    type: str
-    returned: always
-    sample: 'goodbye'
+    sample: True
+api_keys:
+    description: The api keys of the team.
+    type: list
+    returned: when teams are created
+    sample: '"team_name": [{"key": "odt_supersafeapikey", "maskedKey": "odt_****************************ikey"}]'
 '''
 
 from ansible.module_utils.basic import AnsibleModule
@@ -133,7 +229,7 @@ def run_module():
 
     verify_portfolio_access_control_spec = dict(
         enabled=dict(type='bool', default=False, choices=[True, False]),
-        rootProject=dict(type='str', default='')
+        root_project=dict(type='str', default='')
     )
 
     portfolio_access_control_spec = dict(
@@ -143,12 +239,12 @@ def run_module():
 
     teams_spec = dict(
         name=dict(type='str'),
-        oidcGroups=dict(type='list', default=[]),
+        oidc_groups=dict(type='list', default=[]),
         permissions=dict(type='list', default=[],
                          choices=['ACCESS_MANAGEMENT', 'BOM_UPLOAD', 'POLICY_MANAGEMENT', 'POLICY_VIOLATION_ANALYSIS',
                                   'PORTFOLIO_MANAGEMENT', 'PROJECT_CREATION_UPLOAD', 'SYSTEM_CONFIGURATION',
                                   'VIEW_PORTFOLIO', 'VIEW_VULNERABILITY', 'VULNERABILITY_MANAGEMENT']),
-        portfolioAccessControl=dict(type='dict', default={}, options=portfolio_access_control_spec)
+        portfolio_access_control=dict(type='dict', default={}, options=portfolio_access_control_spec)
     )
 
     project_spec = dict(
@@ -162,8 +258,8 @@ def run_module():
 
     module_args = dict(
         url=dict(type='str', required=True),
-        apiKey=dict(type='str', required=True),
-        oidcGroups=dict(type='list', default=[]),
+        api_key=dict(type='str', required=True),
+        oidc_groups=dict(type='list', default=[]),
         teams=dict(type='list', default=[], elements='dict', options=teams_spec),
         projects=dict(type='list', default=[], elements='dict', options=project_spec),
         state=dict(type='str', default='present', choices=['absent', 'present']),
@@ -196,8 +292,8 @@ def run_module():
         module.exit_json(**result)
 
     url = module.params['url']
-    api_key = module.params['apiKey']
-    oidc_groups = module.params['oidcGroups']
+    api_key = module.params['api_key']
+    oidc_groups = module.params['oidc_groups']
     teams = module.params['teams']
     projects = module.params['projects']
     state = module.params['state']
@@ -212,7 +308,7 @@ def run_module():
         changed = create_projects(url, api_key, projects)
         result['changed'] = result['changed'] or changed
 
-        result['apiKey'] = get_team_api_keys(url, api_key, teams)
+        result['api_keys'] = get_team_api_keys(url, api_key, teams)
 
         changed = manage_group_mappings(url, api_key, teams)
         result['changed'] = result['changed'] or changed
@@ -339,10 +435,10 @@ def manage_group_mappings(url: str, api_key: str, teams: dict):
     changed = False
     existing_project_tree = get_project_tree(url, api_key)
     for team in teams:
-        group_change = manage_oidc_groups(url, api_key, existing_teams[team['name']], team['oidcGroups'])
+        group_change = manage_oidc_groups(url, api_key, existing_teams[team['name']], team['oidc_groups'])
         permission_change = manage_permissions(url, api_key, existing_teams[team['name']], team['permissions'])
         activate_portfolio_access_control(url, api_key)
-        portfolio_access_control_change = manage_portfolio_access_control(url, api_key, existing_project_tree, existing_teams[team['name']], team['portfolioAccessControl'])
+        portfolio_access_control_change = manage_portfolio_access_control(url, api_key, existing_project_tree, existing_teams[team['name']], team['portfolio_access_control'])
         changed = changed or group_change or permission_change or portfolio_access_control_change
     return changed
 
@@ -383,7 +479,7 @@ def manage_permissions(url, api_key, team_uuid, team_permissions: list) -> bool:
 def manage_portfolio_access_control(url: str, api_key: str, existing_project_tree: dir, team_uuid: str, team_portfolio_access_control: dict) -> bool:
     projects = team_portfolio_access_control['projects']
     if team_portfolio_access_control['verify']['enabled']:
-        projects = filter_project_list(existing_project_tree, team_portfolio_access_control['verify']['rootProject'], team_portfolio_access_control['projects'])
+        projects = filter_project_list(existing_project_tree, team_portfolio_access_control['verify']['root_project'], team_portfolio_access_control['projects'])
 
     return update_portfolio_access_control(url, api_key, existing_project_tree, team_uuid, team_portfolio_access_control['verify'], projects)
 
