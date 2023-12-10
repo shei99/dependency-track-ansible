@@ -201,7 +201,10 @@ def run_module():
         changed = create_teams(url, api_key, teams)
         result['changed'] = result['changed'] or changed
 
-        manage_group_mappings(url, api_key, teams)
+        result['apiKey'] = get_team_api_keys(url, api_key, teams)
+
+        changed = manage_group_mappings(url, api_key, teams)
+        result['changed'] = result['changed'] or changed
     else:
         # Delete oidc group
         changed = delete_oidc_groups(url, api_key, oidc_groups)
@@ -267,7 +270,6 @@ def create_teams(url: str, api_key: str, teams: list):
         if resp.status_code == 201:
             changed = True
             existing_teams.append(team_name)
-            raise Exception(resp.json())
     return changed
 
 
@@ -351,10 +353,10 @@ def update_portfolio_access_control(url: str, api_key: str, existing_project_tre
             if resp.status_code == 200:
                 changed = True
         else:
-            print("delete", team_uuid, existing_project_tree[key][DICT_KEY_ID])
             resp = requests.delete(f"{url}/api/v1/acl/mapping/team/{team_uuid}/project/{existing_project_tree[key][DICT_KEY_ID]}", headers=headers)
-            if resp.status_code == 200:
-                changed = True
+            # TODO verify status (guess: always 200)
+            # if resp.status_code == 200:
+            #     changed = True
         child_changed = update_portfolio_access_control(url, api_key, existing_project_tree[key][DICT_KEY_CHILDREN], team_uuid, team_portfolio_access_control_verify, projects)
         changed = changed or child_changed
     return changed
@@ -380,6 +382,15 @@ def get_existing_teams(url: str, api_key: str) -> dict:
     for team in resp.json():
         name_to_id_mapping[team['name']] = team['uuid']
     return name_to_id_mapping
+
+
+def get_team_api_keys(url: str, api_key: str, teams: list) -> dict:
+    url = f"{url}/api/v1/team"
+    headers = {'X-API-Key': api_key}
+    resp = requests.get(url, headers=headers)
+
+    team_names = [team['name'] for team in teams]
+    return {team['name']: team['apiKeys'] for team in resp.json() if team['name'] in team_names}
 
 
 def get_existing_oidc_groups(url: str, api_key: str):
