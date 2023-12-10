@@ -131,33 +131,42 @@ DICT_KEY_ID = 'id'
 def run_module():
     # define available arguments/parameters a user can pass to the module
 
-    verify_portfolio_access_control = dict(
+    verify_portfolio_access_control_spec = dict(
         enabled=dict(type='bool', default=False, choices=[True, False]),
         rootProject=dict(type='str', default='')
     )
 
-    portfolio_access_control = dict(
-        verify=dict(type='dict', default={}, options=verify_portfolio_access_control),
+    portfolio_access_control_spec = dict(
+        verify=dict(type='dict', default={}, options=verify_portfolio_access_control_spec),
         projects=dict(type='list', default=[]),
     )
 
     teams_spec = dict(
         name=dict(type='str'),
         oidcGroups=dict(type='list', default=[]),
-        ldapGroups=dict(type='list', default=[]),
         permissions=dict(type='list', default=[],
                          choices=['ACCESS_MANAGEMENT', 'BOM_UPLOAD', 'POLICY_MANAGEMENT', 'POLICY_VIOLATION_ANALYSIS',
                                   'PORTFOLIO_MANAGEMENT', 'PROJECT_CREATION_UPLOAD', 'SYSTEM_CONFIGURATION',
                                   'VIEW_PORTFOLIO', 'VIEW_VULNERABILITY', 'VULNERABILITY_MANAGEMENT']),
-        portfolioAccessControl=dict(type='dict', default={}, options=portfolio_access_control)
+        portfolioAccessControl=dict(type='dict', default={}, options=portfolio_access_control_spec)
+    )
+
+    project_spec = dict(
+        name=dict(type='str'),
+        parent=dict(type='str', default=None),
+        classifier=dict(type='str', default='APPLICATION',
+                         choices=['APPLICATION', 'CONTAINER', 'DEVICE', 'FILE',
+                                  'FIRMWARE', 'FRAMEWORK', 'LIBRARY',
+                                  'OPERATING SYSTEM']),
     )
 
     module_args = dict(
         url=dict(type='str', required=True),
         apiKey=dict(type='str', required=True),
         oidcGroups=dict(type='list', default=[]),
+        teams=dict(type='list', default=[], elements='dict', options=teams_spec),
+        projects=dict(type='list', default=[], elements='dict', options=project_spec),
         state=dict(type='str', default='present', choices=['absent', 'present']),
-        teams=dict(type='list', default=[], elements='dict', options=teams_spec)
     )
 
     # seed the result dict in the object
@@ -190,15 +199,17 @@ def run_module():
     api_key = module.params['apiKey']
     oidc_groups = module.params['oidcGroups']
     teams = module.params['teams']
+    projects = module.params['projects']
     state = module.params['state']
 
     if state == 'present':
-        # Create oidc group
         changed = create_oidc_groups(url, api_key, oidc_groups)
         result['changed'] = result['changed'] or changed
 
-        # Create team
         changed = create_teams(url, api_key, teams)
+        result['changed'] = result['changed'] or changed
+
+        changed = create_projects(url, api_key, projects)
         result['changed'] = result['changed'] or changed
 
         result['apiKey'] = get_team_api_keys(url, api_key, teams)
@@ -206,12 +217,13 @@ def run_module():
         changed = manage_group_mappings(url, api_key, teams)
         result['changed'] = result['changed'] or changed
     else:
-        # Delete oidc group
         changed = delete_oidc_groups(url, api_key, oidc_groups)
         result['changed'] = result['changed'] or changed
 
-        # Delete team
         changed = delete_teams(url, api_key, teams)
+        result['changed'] = result['changed'] or changed
+
+        changed = delete_projects(url, api_key, projects)
         result['changed'] = result['changed'] or changed
 
 
@@ -286,6 +298,40 @@ def delete_teams(url: str, api_key: str, teams: list):
         if resp.status_code == 200:
             changed = True
     return changed
+
+
+def create_projects(url: str, api_key: str, projects: dict) -> bool:
+    existing_project_tree = flatten_project_tree(get_project_tree(url, api_key))
+    headers = {'X-API-Key': api_key}
+    changed = False
+    for project in projects:
+        if project['name'] in existing_project_tree.keys():
+            continue
+        if project['parent'] is not None and project['parent'] not in existing_project_tree.keys():
+            continue
+
+        parent = project['parent']
+        if parent is not None and parent in existing_project_tree.keys():
+            parent = {'uuid': existing_project_tree[parent]}
+        # {"name":"dont","parent":null,"classifier":"CONTAINER","tags":[],"active":true}
+
+        payload = {'name': project['name'], 'parent': parent, 'classifier': project['classifier'], 'tags': [], 'active': True}
+        # raise Exception(payload)
+        resp = requests.put(f"{url}/api/v1/project", json=payload, headers=headers)
+        if resp.status_code == 201:
+            changed = True
+
+    return changed
+
+
+def delete_projects(url: str, api_key: str, projects: list) -> bool:
+    existing_project_tree = flatten_project_tree(get_project_tree(url, api_key))
+    headers = {'X-API-Key': api_key}
+    for project in projects:
+        if project['name'] not in existing_project_tree.keys():
+            continue
+        requests.delete(f"{url}/api/v1/project/{existing_project_tree[project['name']]}", headers=headers)
+    return False
 
 
 def manage_group_mappings(url: str, api_key: str, teams: dict):
@@ -484,6 +530,15 @@ def get_children_of_project(url: str, api_key: str, project_id: str) -> dict:
     for child in project['children']:
         name_to_id_mapping[child['name']] = child['uuid']
     return name_to_id_mapping
+
+
+def flatten_project_tree(project_tree: dict) -> dict:
+    flatten = defaultdict()
+    for key in project_tree.keys():
+        flatten[key] = project_tree[key][DICT_KEY_ID]
+        child_flatten = flatten_project_tree(project_tree[key][DICT_KEY_CHILDREN])
+        flatten = flatten | child_flatten
+    return flatten
 
 
 def main():
