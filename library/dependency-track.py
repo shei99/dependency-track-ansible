@@ -313,13 +313,13 @@ def create_projects(url: str, api_key: str, projects: dict) -> bool:
         parent = project['parent']
         if parent is not None and parent in existing_project_tree.keys():
             parent = {'uuid': existing_project_tree[parent]}
-        # {"name":"dont","parent":null,"classifier":"CONTAINER","tags":[],"active":true}
 
         payload = {'name': project['name'], 'parent': parent, 'classifier': project['classifier'], 'tags': [], 'active': True}
-        # raise Exception(payload)
         resp = requests.put(f"{url}/api/v1/project", json=payload, headers=headers)
         if resp.status_code == 201:
             changed = True
+            response_body = resp.json()
+            existing_project_tree[response_body['name']] = response_body['uuid']
 
     return changed
 
