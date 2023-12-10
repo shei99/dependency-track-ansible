@@ -1,21 +1,74 @@
 - name: test my new module
   hosts: localhost
   tasks:
-    - name: run the new module
+    - name: create oidc groups
       dependency-track:
-        url: 'http://localhost:8081'
-        apiKey: ''
-        oidcGroups:
-          - "Universphere"
-          - "Foobar"
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        oidc_groups:
+          - Foobar
+          - Foo
+          - Bar
+
+    - name: create team
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        teams:
+          - name: Foo
+
+    - name: create projects
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        projects:
+          - name: Foobar
+            classifier: APPLICATION
+          - name: FoobarContainer
+            parent: Foobar
+            classifier: CONTAINER
+          - name: Foo
+            classifier: APPLICATION
+          - name: Bar
+            classifier: APPLICATION
+
+    - name: create foobar team with permissions and portfolio access control
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
         teams:
           - name: Foobar
-            oidcGroups:
-              - Universphere
+            oidc_groups:
               - Foobar
-#            ldapGroups: []
             permissions:
               - SYSTEM_CONFIGURATION
-            portfolioAccessControl:
-              - StaardUp
+            portfolio_access_control:
+              verify:
+                enabled: True
+                root_project: Foobar
+              projects:
+                - FoobarContainer
 
+    - name: delete oidc group
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        oidc_groups:
+          - Bar
+        state: absent
+
+    - name: delete team
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        teams:
+          - name: Bar
+        state: absent
+
+    - name: delete project
+      dependency-track:
+        url: 'http://dependencytrack.example.com'
+        api_key: 'api_key'
+        projects:
+          - name: Bar
+        state: absent
